@@ -32,6 +32,7 @@ ENV_VARS: dict[str, str] = {
     "LLM_MODEL": "llm_model",
     "GROQ_API_KEY": "groq_api_key",
     "OPENROUTER_API_KEY": "openrouter_api_key",
+    "DB_PATH": "db_path",
 }
 
 
