@@ -7,11 +7,8 @@ não entender o negócio do que por não saber SQL.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from textsql.db import Database
-
-NOTES_PATH = Path(__file__).parent / "prompts" / "schema_notes.md"
+from textsql.prompts import load_prompt
 
 
 def schema_ddl(db: Database) -> str:
@@ -24,7 +21,7 @@ def schema_ddl(db: Database) -> str:
 
 
 def schema_notes() -> str:
-    return NOTES_PATH.read_text(encoding="utf-8")
+    return load_prompt("schema_notes")
 
 
 def schema_description(db: Database) -> str:

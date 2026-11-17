@@ -5,7 +5,25 @@ from pathlib import Path
 import pytest
 
 from textsql.db import Database
+from textsql.llm.base import Message
 from textsql.load import load_olist
+
+
+class FakeLLM:
+    """Cliente falso que cumpre o Protocol LLMClient. Devolve as respostas na ordem dada."""
+
+    model = "fake"
+
+    def __init__(self, *answers: str):
+        self.answers = list(answers)
+        self.calls: list[list[Message]] = []
+
+    def complete(self, messages: list[Message], *, temperature: float = 0.0) -> str:
+        self.calls.append(messages)
+        if not self.answers:
+            raise AssertionError("FakeLLM recebeu mais chamadas do que respostas programadas")
+        return self.answers.pop(0)
+
 
 # cabeçalhos iguais aos CSVs reais do Kaggle
 MINI_OLIST: dict[str, list[str]] = {

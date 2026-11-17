@@ -1,26 +1,13 @@
 import pytest
+from conftest import FakeLLM
 
 from textsql.config import Settings
-from textsql.llm import PROVIDERS, LLMClient, Message, get_llm
+from textsql.llm import PROVIDERS, LLMClient, get_llm
 from textsql.llm.openai_compat import OpenAICompatibleClient
 
 
-class FakeLLM:
-    """Cliente falso que cumpre o Protocol; será reutilizado nos testes do agente."""
-
-    model = "fake"
-
-    def __init__(self, answer: str = "SELECT 1"):
-        self.answer = answer
-        self.calls: list[list[Message]] = []
-
-    def complete(self, messages: list[Message], *, temperature: float = 0.0) -> str:
-        self.calls.append(messages)
-        return self.answer
-
-
 def test_fake_cumpre_o_protocolo():
-    fake = FakeLLM()
+    fake = FakeLLM("SELECT 1")
     assert isinstance(fake, LLMClient)
     assert fake.complete([{"role": "user", "content": "oi"}]) == "SELECT 1"
     assert len(fake.calls) == 1
