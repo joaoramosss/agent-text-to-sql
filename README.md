@@ -3,7 +3,7 @@
 Agente conversacional que responde perguntas em português sobre dados de e-commerce (dataset Olist):
 pergunta → lê o schema → gera SQL → executa no DuckDB → corrige sozinho se der erro → responde com tabela/gráfico e explicação curta.
 
-> Em construção. Etapa atual: **5 — Interface** (Streamlit com gráficos e memória de conversa).
+> Em construção. Etapa atual: **6 — Avaliação** (conjunto de perguntas e taxa de acerto).
 
 ```
 $ uv run python scripts/chat.py "Qual o tempo médio de entrega em dias?"
@@ -37,6 +37,7 @@ uv run python scripts/check_llm.py    # testa a conexão com o LLM
 uv run python scripts/load_data.py    # baixa o Olist (sem conta Kaggle) e gera data/olist.duckdb
 uv run streamlit run streamlit_app.py # interface web em http://localhost:8501
 uv run python scripts/chat.py         # pergunte no terminal (ou passe a pergunta como argumento)
+uv run python scripts/evaluate.py     # mede a taxa de acerto (eval/questions.toml -> eval/results/)
 uv run pytest                         # testes
 uv run ruff check .                   # lint
 ```
@@ -55,8 +56,10 @@ src/textsql/        código do agente
   agent.py          pergunta -> SQL -> validação -> execução -> resposta, com autocorreção
   sql_utils.py      extrai o SQL da resposta do modelo
   display.py        escolhe o gráfico pelo formato do resultado; formatação pt-BR
+  evaluation.py     compara o resultado do agente com o de um SQL de referência
   prompts/          textos que vão para o LLM (.md), carregados por load_prompt()
 streamlit_app.py    interface web: chat, gráfico, tabela e SQL de cada resposta
+eval/               perguntas de avaliação com SQL de referência e resultados de cada rodada
 scripts/            utilitários de linha de comando
 tests/              pytest (usa um Olist em miniatura; testes do banco real pulam se ele não existir)
 data/               dataset e banco (não versionados)
@@ -76,6 +79,28 @@ pergunta ─► LLM gera SQL ─► guardrails ─► DuckDB (limite + timeout) 
 `Agent.ask()` devolve um `AgentResult` com `status`:
 `ok` | `unanswerable` (o modelo respondeu `SEM_SQL:`) | `blocked` | `failed` (esgotou tentativas),
 além do histórico de tentativas (`attempts`).
+
+### Avaliação
+
+30 perguntas em `eval/questions.toml` (contagem, agregação, ranking, temporal, pegadinhas do
+schema e 3 pedidos que devem ser recusados), cada uma com SQL de referência conferido à mão.
+O script compara o **resultado** do SQL do agente com o da referência, não o texto do SQL
+(*execution accuracy*): nomes de coluna ignorados, colunas extras aceitas, ordem só quando a
+pergunta pede, tolerância numérica de 0,1%.
+
+| Rodada | Mudança | Acerto |
+|---|---|---|
+| 1 | — | 26/30 (87%) |
+| 2 | notas do schema: data da compra para períodos; filtro `delivered` só em vendas/receita; referência alternativa onde "vendido" é ambíguo | 28/30 (93%) |
+| 3 | referência alternativa para "entregues em cada ano" (ano da compra ou da entrega) | **29/30 (97%)** |
+
+Modelo `openai/gpt-oss-120b` (Groq), todas acertadas de primeira, latência média ~1 s por SQL.
+Erro restante: em "valor total pago por tipo de pagamento" o agente filtra pedidos entregues
+sem a pergunta pedir. Relatórios completos em `eval/results/`.
+
+Limitações: 30 perguntas é pouco para separar modelos parecidos; o mesmo conjunto guiou os
+ajustes do prompt (o ideal é um conjunto separado só para teste); o loop de autocorreção não foi
+acionado nessas rodadas, então ele é coberto pelos testes unitários, não por esta métrica.
 
 ### Memória de conversa
 

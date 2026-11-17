@@ -52,6 +52,10 @@ sellers.seller_zip_code_prefix     = geolocation.geolocation_zip_code_prefix
 - Receita: use `order_items.price` (e `freight_value` se a pergunta incluir frete).
   `order_payments.payment_value` é o que o cliente pagou, com frete e possíveis vouchers.
 - "Faturamento", "receita", "vendas" sem qualificação: considere pedidos `delivered`.
+  Esse filtro vale só para essas métricas: pagamentos, avaliações, cadastros (clientes,
+  vendedores, produtos) e contagens de pedidos não filtram status, salvo se a pergunta pedir.
 - Datas são `TIMESTAMP`; para agrupar por mês use `date_trunc('month', coluna)`.
+- Para agrupar ou filtrar por período ("por mês", "em 2017", "por ano"), use a data da compra,
+  `order_purchase_timestamp`, a menos que a pergunta fale em entrega ou aprovação.
 - Textos de cidade estão em minúsculas: compare com `lower()` ou escreva em minúsculas.
 - Prefixos de CEP são texto com zero à esquerda (`'01003'`), não número.

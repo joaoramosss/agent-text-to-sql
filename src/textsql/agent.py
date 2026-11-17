@@ -87,9 +87,12 @@ class Agent:
         self._answer_system_prompt = load_prompt("answer")
         self._fix_prompt = load_prompt("fix_sql")
 
-    def ask(self, question: str, history: Sequence[AgentResult] = ()) -> AgentResult:
+    def ask(
+        self, question: str, history: Sequence[AgentResult] = (), *, explain: bool = True
+    ) -> AgentResult:
         """Responde `question`. `history`: resultados anteriores da conversa, do mais antigo
-        ao mais recente; permite perguntas de seguimento como "e por estado?"."""
+        ao mais recente; permite perguntas de seguimento como "e por estado?".
+        `explain=False` pula a chamada que redige a resposta (a avaliação só mede o SQL)."""
         context = self._recent_turns(history)
         messages: list[Message] = [{"role": "system", "content": self._sql_system_prompt}]
         for turn in context:
@@ -128,10 +131,11 @@ class Agent:
                 continue
 
             attempts.append(Attempt(sql))
+            answer = self._answer_or_fallback(question, sql, result, context) if explain else ""
             return AgentResult(
                 question,
                 "ok",
-                self._answer_or_fallback(question, sql, result, context),
+                answer,
                 sql=sql,
                 rows=result.rows,
                 truncated=result.truncated,
