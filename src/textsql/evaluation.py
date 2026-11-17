@@ -182,6 +182,8 @@ class EvalRecord:
     latency_s: float
     sql: str | None
     error: str | None = None
+    tokens: int = 0
+    trace_id: str | None = None  # liga o registro ao trace completo em logs/traces.jsonl
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -239,6 +241,8 @@ def evaluate_question(
         latency_s=round(latency, 2),
         sql=result.sql,
         error=last_error if not correct else None,
+        tokens=result.trace.tokens if result.trace else 0,
+        trace_id=result.trace.trace_id if result.trace else None,
     )
 
 
@@ -258,6 +262,7 @@ def summarize(records: Sequence[EvalRecord]) -> dict[str, Any]:
         "fixed_by_retry": sum(r.correct and r.attempts > 1 for r in records),
         "llm_errors": sum(r.status == "llm_error" for r in records),
         "avg_latency_s": round(sum(r.latency_s for r in records) / total, 2) if total else 0.0,
+        "avg_tokens": round(sum(r.tokens for r in records) / total) if total else 0,
         "by_category": {k: {"correct": v[0], "total": v[1]} for k, v in by_category.items()},
     }
 
@@ -270,17 +275,24 @@ def report_markdown(records: Sequence[EvalRecord], summary: dict[str, Any], mode
         f"**Acerto: {summary['correct']}/{summary['total']} ({pct})** · "
         f"de primeira: {summary['first_try']} · corrigidas pela autocorreção: "
         f"{summary['fixed_by_retry']} · erros do provedor: {summary['llm_errors']} · "
-        f"latência média: {summary['avg_latency_s']}s",
+        f"latência média: {summary['avg_latency_s']}s · tokens por pergunta: "
+        f"{summary['avg_tokens']}",
         "",
         "| Categoria | Acerto |",
         "|---|---|",
     ]
     for cat, v in summary["by_category"].items():
         lines.append(f"| {cat} | {v['correct']}/{v['total']} |")
-    lines += ["", "| id | status | ok | tentativas | s |", "|---|---|---|---|---|"]
+    lines += [
+        "",
+        "| id | status | ok | tentativas | s | tokens |",
+        "|---|---|---|---|---|---|",
+    ]
     for r in records:
         mark = "✅" if r.correct else "❌"
-        lines.append(f"| {r.id} | {r.status} | {mark} | {r.attempts} | {r.latency_s} |")
+        lines.append(
+            f"| {r.id} | {r.status} | {mark} | {r.attempts} | {r.latency_s} | {r.tokens} |"
+        )
     failures = [r for r in records if not r.correct]
     if failures:
         lines += ["", "## Erros", ""]

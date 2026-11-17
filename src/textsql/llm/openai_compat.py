@@ -6,6 +6,8 @@ Esses provedores expõem o mesmo endpoint `/chat/completions`; o que muda é só
 
 from __future__ import annotations
 
+import threading
+
 import openai
 from openai import OpenAI
 
@@ -29,6 +31,13 @@ class OpenAICompatibleClient:
         self._client = OpenAI(
             base_url=base_url, api_key=api_key, timeout=timeout, max_retries=max_retries
         )
+        # consumo da última chamada, por thread: o mesmo cliente atende várias sessões
+        self._local = threading.local()
+
+    @property
+    def last_usage(self) -> dict[str, int] | None:
+        """Tokens da última chamada feita *nesta thread* (None se o provedor não informou)."""
+        return getattr(self._local, "usage", None)
 
     def complete(self, messages: list[Message], *, temperature: float = 0.0) -> str:
         try:
@@ -40,4 +49,14 @@ class OpenAICompatibleClient:
         except openai.APIError as exc:
             # traduz para um erro do projeto: o agente não precisa conhecer o SDK da OpenAI
             raise LLMError(f"{type(exc).__name__}: {exc}") from exc
+        usage = response.usage
+        self._local.usage = (
+            {
+                "prompt_tokens": usage.prompt_tokens,
+                "completion_tokens": usage.completion_tokens,
+                "total_tokens": usage.total_tokens,
+            }
+            if usage
+            else None
+        )
         return response.choices[0].message.content or ""

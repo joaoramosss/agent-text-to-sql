@@ -53,6 +53,10 @@ def test_pergunta_mostra_resposta_metrica_e_sql(use_fake_agent):
     assert at.metric[0].value == "2"
     assert any("count(*)" in c.value for c in at.code)
     assert len(at.session_state["history"]) == 1
+    # detalhes: linha do tempo das etapas + resumo do trace
+    trace = at.session_state["history"][0].trace
+    assert any(trace.trace_id in c.value for c in at.caption)
+    assert len(at.dataframe) == 2  # tabela de dados (no expander) + linha do tempo das etapas
 
 
 def test_ranking_vira_grafico_de_barras(use_fake_agent):
@@ -64,7 +68,7 @@ def test_ranking_vira_grafico_de_barras(use_fake_agent):
     charts = at.get("vega_lite_chart")
     assert len(charts) == 1
     assert json.loads(charts[0].proto.spec)["mark"]["type"] == "bar"
-    assert len(at.dataframe) == 1  # a tabela aparece junto
+    assert len(at.dataframe) == 2  # a tabela de dados aparece junto (+ a das etapas)
 
 
 def test_bloqueio_aparece_como_aviso(use_fake_agent):

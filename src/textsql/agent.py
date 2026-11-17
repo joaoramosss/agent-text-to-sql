@@ -13,10 +13,14 @@ Falha de infraestrutura (`LLMError` ao gerar SQL) sobe como exceção: não é u
 Memória de conversa: o agente não guarda estado. Quem chama passa os resultados anteriores
 (`history`) e o agente põe no prompt as últimas perguntas respondidas, com o SQL de cada uma.
 Sem estado, um único agente atende várias sessões ao mesmo tempo (ex.: Streamlit).
+
+Observabilidade: cada `ask` gera um `Trace` (ver `tracing.py`) com tempo, tokens, entrada,
+saída e erro de cada etapa.
 """
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Literal
@@ -31,6 +35,7 @@ from textsql.llm import LLMClient, Message, get_llm
 from textsql.prompts import load_prompt
 from textsql.schema import schema_description
 from textsql.sql_utils import extract_sql, no_sql_reason
+from textsql.tracing import JsonlTraceSink, LoggingTraceSink, Trace, TraceSink, emit_safely
 
 # ok: respondeu | unanswerable: o modelo disse que os dados não respondem isso |
 # blocked: guardrail barrou | failed: esgotou as tentativas sem SQL válido
@@ -54,6 +59,7 @@ class AgentResult:
     rows: pd.DataFrame | None = None
     truncated: bool = False
     attempts: list[Attempt] = field(default_factory=list)
+    trace: Trace | None = None
 
     @property
     def ok(self) -> bool:
@@ -71,6 +77,7 @@ class Agent:
         timeout_s: float = 10.0,
         sample_rows: int = 20,
         max_history: int = 3,
+        trace_sinks: Sequence[TraceSink] = (),
     ):
         self.llm = llm
         self.db = db
@@ -79,6 +86,7 @@ class Agent:
         self.max_rows = max_rows
         self.timeout_s = timeout_s
         self.sample_rows = sample_rows
+        self.trace_sinks = tuple(trace_sinks)
         self.tables = db.tables()
         # o schema é estático: monta o system prompt uma vez só
         self._sql_system_prompt = load_prompt("generate_sql").replace(
@@ -86,13 +94,33 @@ class Agent:
         )
         self._answer_system_prompt = load_prompt("answer")
         self._fix_prompt = load_prompt("fix_sql")
+        # o system prompt (~5 mil caracteres) não vai para cada trace; vai o hash dele
+        prompts = self._sql_system_prompt + self._answer_system_prompt + self._fix_prompt
+        self.prompt_version = hashlib.sha256(prompts.encode()).hexdigest()[:10]
 
     def ask(
         self, question: str, history: Sequence[AgentResult] = (), *, explain: bool = True
     ) -> AgentResult:
         """Responde `question`. `history`: resultados anteriores da conversa, do mais antigo
         ao mais recente; permite perguntas de seguimento como "e por estado?".
-        `explain=False` pula a chamada que redige a resposta (a avaliação só mede o SQL)."""
+        `explain=False` pula a chamada que redige a resposta (a avaliação só mede o SQL).
+
+        Cada chamada gera um trace (`result.trace`), enviado aos `trace_sinks` no fim, mesmo
+        se o LLM falhar no meio."""
+        trace = Trace(question, model=self.llm.model, prompt_version=self.prompt_version)
+        status = "llm_error"  # se uma exceção escapar, é falha do provedor
+        try:
+            result = self._ask(question, history, explain, trace)
+            result.trace = trace
+            status = result.status
+            return result
+        finally:
+            trace.finish(status)
+            emit_safely(trace, self.trace_sinks)
+
+    def _ask(
+        self, question: str, history: Sequence[AgentResult], explain: bool, trace: Trace
+    ) -> AgentResult:
         context = self._recent_turns(history)
         messages: list[Message] = [{"role": "system", "content": self._sql_system_prompt}]
         for turn in context:
@@ -104,8 +132,16 @@ class Agent:
         messages.append({"role": "user", "content": question})
         attempts: list[Attempt] = []
 
-        for _ in range(self.max_attempts):
-            reply = self.llm.complete(messages)
+        for attempt in range(1, self.max_attempts + 1):
+            with trace.span("generate_sql", attempt) as span:
+                reply = self.llm.complete(messages)
+                # input: só o que mudou (pergunta ou erro devolvido); o resto é fixo/histórico
+                span.set(
+                    input=messages[-1]["content"],
+                    output=reply,
+                    history_turns=len(context),
+                    **self._usage(),
+                )
 
             reason = no_sql_reason(reply)
             if reason is not None:
@@ -113,9 +149,13 @@ class Agent:
 
             sql = ""
             try:
-                sql = extract_sql(reply)
-                validate_sql(sql, self.tables)
-                result = self.db.run(sql, max_rows=self.max_rows, timeout_s=self.timeout_s)
+                with trace.span("validate", attempt) as span:
+                    sql = extract_sql(reply)
+                    span.set(sql=sql)
+                    validate_sql(sql, self.tables)
+                with trace.span("execute", attempt) as span:
+                    result = self.db.run(sql, max_rows=self.max_rows, timeout_s=self.timeout_s)
+                    span.set(rows=len(result.rows), truncated=result.truncated)
             except UnsafeSQLError as exc:
                 attempts.append(Attempt(sql, str(exc)))
                 answer = f"Consulta bloqueada: {exc} Este agente só faz consultas de leitura."
@@ -131,7 +171,9 @@ class Agent:
                 continue
 
             attempts.append(Attempt(sql))
-            answer = self._answer_or_fallback(question, sql, result, context) if explain else ""
+            answer = ""
+            if explain:
+                answer = self._answer_or_fallback(question, sql, result, context, trace)
             return AgentResult(
                 question,
                 "ok",
@@ -166,17 +208,29 @@ class Agent:
             ]
         )
 
+    def _usage(self) -> dict[str, int]:
+        # last_usage é opcional no contrato LLMClient (ver llm/base.py)
+        return getattr(self.llm, "last_usage", None) or {}
+
     def _recent_turns(self, history: Sequence[AgentResult]) -> list[AgentResult]:
         # só turnos que deram certo: SQL com erro ou bloqueado não é exemplo a seguir
         usable = [r for r in history if r.ok and r.sql]
         return usable[-self.max_history :] if self.max_history else []
 
     def _answer_or_fallback(
-        self, question: str, sql: str, result: QueryResult, context: Sequence[AgentResult]
+        self,
+        question: str,
+        sql: str,
+        result: QueryResult,
+        context: Sequence[AgentResult],
+        trace: Trace,
     ) -> str:
         # a consulta já deu certo: se o LLM falhar agora, a tabela ainda vale ser mostrada
         try:
-            return self.answer(question, sql, result, context)
+            with trace.span("answer") as span:
+                answer = self.answer(question, sql, result, context)
+                span.set(output=answer, **self._usage())
+                return answer
         except LLMError:
             return "Consulta executada, mas não consegui gerar a explicação agora. Veja a tabela."
 
@@ -195,12 +249,16 @@ class Agent:
 
 
 def build_agent(settings: Settings | None = None) -> Agent:
-    """Monta o agente a partir do `.env` (provedor, banco e limites)."""
+    """Monta o agente a partir do `.env` (provedor, banco, limites e destino dos traces)."""
     settings = settings or load_settings()
+    sinks: list[TraceSink] = [LoggingTraceSink()]
+    if settings.trace_file:  # TRACE_FILE=off desliga o arquivo (o log continua)
+        sinks.append(JsonlTraceSink(settings.trace_file))
     return Agent(
         get_llm(settings),
         Database(settings.db_path),
         max_attempts=settings.agent_max_attempts,
         max_rows=settings.sql_max_rows,
         timeout_s=settings.sql_timeout_seconds,
+        trace_sinks=sinks,
     )

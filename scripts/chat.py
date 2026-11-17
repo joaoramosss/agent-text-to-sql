@@ -37,7 +37,14 @@ def show(result: AgentResult) -> None:
             if total > MAX_ROWS_SHOWN:
                 print(f"... (+{total - MAX_ROWS_SHOWN} linhas)")
 
-    print(f"\n{LABELS[result.status]}: {result.answer.strip()}\n")
+    print(f"\n{LABELS[result.status]}: {result.answer.strip()}")
+    if result.trace:
+        t = result.trace
+        print(
+            f"[{t.duration_ms / 1000:.1f}s · {t.llm_calls} chamada(s) ao LLM · "
+            f"{t.tokens} tokens · trace {t.trace_id}]"
+        )
+    print()
 
 
 def ask(agent: Agent, question: str, history: list[AgentResult]) -> None:

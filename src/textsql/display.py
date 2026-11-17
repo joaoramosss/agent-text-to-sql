@@ -13,9 +13,12 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 import pandas as pd
+
+if TYPE_CHECKING:
+    from textsql.tracing import Trace
 
 MAX_BARS = 30  # mais do que isso vira parede de barras; fica só a tabela
 MAX_METRICS = 4
@@ -66,6 +69,34 @@ def format_number(value: float) -> str:
         return "—"
     text = f"{value:,.0f}" if float(value).is_integer() else f"{value:,.2f}"
     return text.replace(",", "_").replace(".", ",").replace("_", ".")
+
+
+SPAN_LABELS = {
+    "generate_sql": "gerar SQL (LLM)",
+    "validate": "validar",
+    "execute": "executar",
+    "answer": "redigir resposta (LLM)",
+}
+
+
+def spans_frame(trace: Trace) -> pd.DataFrame:
+    """Linha do tempo de um trace, uma etapa por linha, para mostrar na interface."""
+    df = pd.DataFrame(
+        [
+            {
+                "etapa": SPAN_LABELS.get(s.name, s.name),
+                "tentativa": s.attempt,
+                "início (ms)": round(s.start_ms),
+                "duração (ms)": round(s.duration_ms),
+                "tokens": s.attrs.get("total_tokens"),
+                "status": "ok" if s.status == "ok" else (s.error or "erro").splitlines()[0],
+            }
+            for s in trace.spans
+        ],
+        columns=["etapa", "tentativa", "início (ms)", "duração (ms)", "tokens", "status"],
+    )
+    # inteiro que aceita vazio: misturar número com "" quebraria a conversão para Arrow
+    return df.astype({"tentativa": "Int64", "tokens": "Int64"})
 
 
 def escape_markdown(text: str) -> str:

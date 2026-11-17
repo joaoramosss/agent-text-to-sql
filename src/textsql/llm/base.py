@@ -20,5 +20,8 @@ class LLMClient(Protocol):
         """Envia a conversa e devolve o texto da resposta do assistente.
 
         Falhas do provedor (rede, cota, erro do servidor) devem virar `textsql.errors.LLMError`.
+
+        Opcional: um atributo `last_usage` ({"prompt_tokens", "completion_tokens",
+        "total_tokens"}) com o consumo da última chamada; o tracing o registra se existir.
         """
         ...

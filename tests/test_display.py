@@ -7,8 +7,10 @@ from textsql.display import (
     as_time,
     escape_markdown,
     format_number,
+    spans_frame,
     suggest_chart,
 )
+from textsql.tracing import Trace
 
 
 def test_vazio_sem_grafico():
@@ -73,6 +75,20 @@ def test_as_time_converte_texto():
 )
 def test_formato_brasileiro(value, expected):
     assert format_number(value) == expected
+
+
+def test_linha_do_tempo_do_trace():
+    trace = Trace("q")
+    with trace.span("generate_sql", attempt=1) as span:
+        span.set(total_tokens=120)
+    with pytest.raises(ValueError), trace.span("execute", attempt=1):
+        raise ValueError("Binder Error: coluna x\nLINE 1: ...")
+
+    df = spans_frame(trace)
+    assert df["etapa"].tolist() == ["gerar SQL (LLM)", "executar"]
+    assert df["tokens"].tolist()[0] == 120 and pd.isna(df["tokens"].tolist()[1])
+    assert df["status"].tolist() == ["ok", "ValueError: Binder Error: coluna x"]
+    assert str(df["tentativa"].dtype) == "Int64"
 
 
 def test_escapa_cifrao_para_nao_virar_latex():

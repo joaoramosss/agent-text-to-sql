@@ -3,7 +3,7 @@
 Agente conversacional que responde perguntas em português sobre dados de e-commerce (dataset Olist):
 pergunta → lê o schema → gera SQL → executa no DuckDB → corrige sozinho se der erro → responde com tabela/gráfico e explicação curta.
 
-> Em construção. Etapa atual: **6 — Avaliação** (conjunto de perguntas e taxa de acerto).
+> Em construção. Etapa atual: **7 — Observabilidade** (trace de cada etapa do agente).
 
 ```
 $ uv run python scripts/chat.py "Qual o tempo médio de entrega em dias?"
@@ -38,6 +38,7 @@ uv run python scripts/load_data.py    # baixa o Olist (sem conta Kaggle) e gera 
 uv run streamlit run streamlit_app.py # interface web em http://localhost:8501
 uv run python scripts/chat.py         # pergunte no terminal (ou passe a pergunta como argumento)
 uv run python scripts/evaluate.py     # mede a taxa de acerto (eval/questions.toml -> eval/results/)
+uv run python scripts/traces.py       # latência por etapa, retries, tokens e erros (logs/traces.jsonl)
 uv run pytest                         # testes
 uv run ruff check .                   # lint
 ```
@@ -57,6 +58,7 @@ src/textsql/        código do agente
   sql_utils.py      extrai o SQL da resposta do modelo
   display.py        escolhe o gráfico pelo formato do resultado; formatação pt-BR
   evaluation.py     compara o resultado do agente com o de um SQL de referência
+  tracing.py        trace/span de cada pergunta; destinos: JSONL e log
   prompts/          textos que vão para o LLM (.md), carregados por load_prompt()
 streamlit_app.py    interface web: chat, gráfico, tabela e SQL de cada resposta
 eval/               perguntas de avaliação com SQL de referência e resultados de cada rodada
@@ -101,6 +103,25 @@ sem a pergunta pedir. Relatórios completos em `eval/results/`.
 Limitações: 30 perguntas é pouco para separar modelos parecidos; o mesmo conjunto guiou os
 ajustes do prompt (o ideal é um conjunto separado só para teste); o loop de autocorreção não foi
 acionado nessas rodadas, então ele é coberto pelos testes unitários, não por esta métrica.
+
+### Observabilidade
+
+Cada pergunta gera um **trace** com um **span** por etapa (`generate_sql`, `validate`,
+`execute`, `answer`; as três primeiras repetem a cada tentativa). Cada span guarda duração,
+tentativa, entrada, saída, tokens e erro. O system prompt (~5 mil caracteres) não é repetido
+em cada trace: vai um hash (`prompt_version`), que diz qual versão do prompt gerou cada resposta.
+
+- `logs/traces.jsonl`: um trace por linha (fora do git; `TRACE_FILE=off` desliga).
+- Log `textsql` (INFO): uma linha por pergunta, visível no console e nos logs da hospedagem.
+- Interface: expander "SQL e etapas" com a linha do tempo; terminal: resumo de tempo e tokens.
+- `scripts/traces.py`: p50/p95 por etapa, taxa de nova tentativa, tokens e erros mais comuns.
+
+Falha ao gravar trace nunca derruba o agente; falha do LLM no meio também gera trace
+(`status=llm_error`). Mesmo modelo de trace/span do OpenTelemetry, sem dependência externa.
+
+Medição real (gpt-oss-120b na Groq): gerar SQL ~1,4 s (p50), validar ~12 ms, executar ~50 ms,
+redigir a resposta ~1,1 s; ~2,6 mil tokens por pergunta. Com o limite de 8 mil tokens/minuto do
+free tier, a demo comporta ~3 perguntas por minuto.
 
 ### Memória de conversa
 

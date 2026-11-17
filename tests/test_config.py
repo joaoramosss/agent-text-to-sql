@@ -39,6 +39,13 @@ def test_le_env_file_e_ignora_valores_vazios(tmp_path):
     assert settings.groq_api_key is None
 
 
+def test_trace_file_padrao_e_off(tmp_path):
+    assert load_settings(env_file=tmp_path / "nao_existe.env").trace_file.name == "traces.jsonl"
+    env = tmp_path / ".env"
+    env.write_text("TRACE_FILE=off\n")
+    assert load_settings(env_file=env).trace_file is None
+
+
 def test_provider_invalido_falha(tmp_path):
     env = tmp_path / ".env"
     env.write_text("LLM_PROVIDER=banana\n")

@@ -28,6 +28,8 @@ class Settings(BaseModel):
     sql_max_rows: PositiveInt = 1000
     sql_timeout_seconds: PositiveFloat = 10.0
     agent_max_attempts: PositiveInt = 3
+    # observabilidade: arquivo JSONL com um trace por pergunta (None = desligado)
+    trace_file: Path | None = PROJECT_ROOT / "logs" / "traces.jsonl"
 
 
 # Variável de ambiente -> campo de Settings. O teste garante que o .env.example documenta todas.
@@ -40,6 +42,7 @@ ENV_VARS: dict[str, str] = {
     "SQL_MAX_ROWS": "sql_max_rows",
     "SQL_TIMEOUT_SECONDS": "sql_timeout_seconds",
     "AGENT_MAX_ATTEMPTS": "agent_max_attempts",
+    "TRACE_FILE": "trace_file",
 }
 
 
@@ -54,4 +57,6 @@ def load_settings(env_file: Path | None = None) -> Settings:
     values = {k: v for k, v in values.items() if v}  # descarta None e ""
     if "llm_provider" in values:
         values["llm_provider"] = values["llm_provider"].lower()
+    if values.get("trace_file", "").lower() == "off":
+        values["trace_file"] = None
     return Settings(**values)

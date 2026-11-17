@@ -9,13 +9,26 @@ ao agente a cada pergunta; o agente em si é um só, compartilhado e sem estado.
 
 from __future__ import annotations
 
+import logging
+
 import altair as alt
 import pandas as pd
 import streamlit as st
 
 from textsql.agent import AgentResult, build_agent
-from textsql.display import ChartSpec, as_time, escape_markdown, format_number, suggest_chart
+from textsql.display import (
+    ChartSpec,
+    as_time,
+    escape_markdown,
+    format_number,
+    spans_frame,
+    suggest_chart,
+)
 from textsql.errors import LLMError
+
+# uma linha por pergunta no console / logs da hospedagem (ver tracing.LoggingTraceSink)
+logging.basicConfig(level=logging.WARNING, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+logging.getLogger("textsql").setLevel(logging.INFO)
 
 # azul validado para daltonismo e contraste (claro / escuro)
 BAR_COLOR = {"light": "#2a78d6", "dark": "#3987e5"}
@@ -107,8 +120,8 @@ def render_result(result: AgentResult, key: str) -> None:
     else:
         st.error(result.answer)
 
-    if result.attempts:
-        render_details(result)
+    if result.attempts or result.trace:
+        render_details(result, key)
 
 
 def render_data(result: AgentResult, key: str) -> None:
@@ -166,9 +179,9 @@ def build_chart(df: pd.DataFrame, spec: ChartSpec) -> alt.Chart:
     )
 
 
-def render_details(result: AgentResult) -> None:
+def render_details(result: AgentResult, key: str) -> None:
     failed = [a for a in result.attempts if a.error]
-    label = "SQL" if not failed else f"SQL e tentativas ({len(result.attempts)})"
+    label = "SQL e etapas" if not failed else f"SQL e etapas ({len(result.attempts)} tentativas)"
     with st.expander(label):
         for i, attempt in enumerate(result.attempts, 1):
             if len(result.attempts) > 1:
@@ -177,6 +190,16 @@ def render_details(result: AgentResult) -> None:
                 st.code(attempt.sql, language="sql")
             if attempt.error:
                 st.caption(f"Erro: {attempt.error}")
+
+        trace = result.trace
+        if trace:
+            st.markdown("**Etapas**")
+            st.dataframe(spans_frame(trace), hide_index=True, key=f"trace-{key}")
+            st.caption(
+                f"{format_number(trace.duration_ms / 1000)} s · {trace.llm_calls} chamada(s) ao "
+                f"LLM · {format_number(trace.tokens)} tokens · trace `{trace.trace_id}` · "
+                f"prompt `{trace.prompt_version}`"
+            )
 
 
 def _theme() -> str:

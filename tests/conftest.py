@@ -19,14 +19,18 @@ class FakeLLM:
 
     model = "fake"
 
-    def __init__(self, *answers: str):
+    def __init__(self, *answers: str, tokens_per_call: int | None = None):
         self.answers = list(answers)
         self.calls: list[list[Message]] = []
+        self.tokens_per_call = tokens_per_call
+        self.last_usage: dict[str, int] | None = None
 
     def complete(self, messages: list[Message], *, temperature: float = 0.0) -> str:
         self.calls.append(messages)
         if not self.answers:
             raise AssertionError("FakeLLM recebeu mais chamadas do que respostas programadas")
+        if self.tokens_per_call is not None:
+            self.last_usage = {"total_tokens": self.tokens_per_call}
         return self.answers.pop(0)
 
 
