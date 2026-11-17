@@ -141,6 +141,40 @@ def test_pergunta_fora_do_escopo(mini_db):
     assert len(llm.calls) == 1
 
 
+# --- memória de conversa -------------------------------------------------------------------------
+
+
+def test_seguimento_leva_pergunta_e_sql_anteriores(mini_db):
+    by_status = sql_block("SELECT order_status, count(*) FROM orders GROUP BY 1")
+    llm = FakeLLM(COUNT, "Há 2 pedidos.", by_status, "ok")
+    agent = Agent(llm, mini_db)
+    first = agent.ask("Quantos pedidos existem?")
+    agent.ask("e por status?", [first])
+
+    messages = llm.calls[2]  # geração de SQL da 2ª pergunta
+    assert [m["role"] for m in messages] == ["system", "user", "assistant", "user"]
+    assert messages[1]["content"] == "Quantos pedidos existem?"
+    assert messages[2]["content"] == "```sql\nSELECT count(*) AS qtd_pedidos FROM orders\n```"
+    assert messages[3]["content"] == "e por status?"
+    # o passo de resposta também sabe do que se trata
+    assert "Pergunta anterior da conversa: Quantos pedidos existem?" in llm.calls[3][1]["content"]
+
+
+def test_historico_ignora_turnos_que_falharam_e_respeita_o_limite(mini_db):
+    agent = Agent(FakeLLM(), mini_db, max_history=2)
+    ok = [agent_result(f"p{i}") for i in range(3)]
+    blocked = agent_result("apague", status="blocked")
+
+    turns = agent._recent_turns([*ok, blocked])
+    assert [t.question for t in turns] == ["p1", "p2"]
+
+
+def agent_result(question, status="ok"):
+    from textsql.agent import AgentResult
+
+    return AgentResult(question, status, "resposta", sql="SELECT 1")
+
+
 # --- falha do LLM --------------------------------------------------------------------------------
 
 

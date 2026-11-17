@@ -1,0 +1,3 @@
+[browser]
+# não envia estatísticas de uso para o Streamlit
+gatherUsageStats = false

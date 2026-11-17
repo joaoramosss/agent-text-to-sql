@@ -9,10 +9,15 @@ Fluxo de `ask`:
 
 O agente não imprime nada: devolve um `AgentResult` com o status e o histórico de tentativas.
 Falha de infraestrutura (`LLMError` ao gerar SQL) sobe como exceção: não é um "resultado".
+
+Memória de conversa: o agente não guarda estado. Quem chama passa os resultados anteriores
+(`history`) e o agente põe no prompt as últimas perguntas respondidas, com o SQL de cada uma.
+Sem estado, um único agente atende várias sessões ao mesmo tempo (ex.: Streamlit).
 """
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -65,10 +70,12 @@ class Agent:
         max_rows: int = 1000,
         timeout_s: float = 10.0,
         sample_rows: int = 20,
+        max_history: int = 3,
     ):
         self.llm = llm
         self.db = db
         self.max_attempts = max_attempts
+        self.max_history = max_history
         self.max_rows = max_rows
         self.timeout_s = timeout_s
         self.sample_rows = sample_rows
@@ -80,11 +87,18 @@ class Agent:
         self._answer_system_prompt = load_prompt("answer")
         self._fix_prompt = load_prompt("fix_sql")
 
-    def ask(self, question: str) -> AgentResult:
-        messages: list[Message] = [
-            {"role": "system", "content": self._sql_system_prompt},
-            {"role": "user", "content": question},
-        ]
+    def ask(self, question: str, history: Sequence[AgentResult] = ()) -> AgentResult:
+        """Responde `question`. `history`: resultados anteriores da conversa, do mais antigo
+        ao mais recente; permite perguntas de seguimento como "e por estado?"."""
+        context = self._recent_turns(history)
+        messages: list[Message] = [{"role": "system", "content": self._sql_system_prompt}]
+        for turn in context:
+            # cada pergunta anterior vira um par user/assistant, com o SQL que funcionou
+            messages += [
+                {"role": "user", "content": turn.question},
+                {"role": "assistant", "content": f"```sql\n{turn.sql}\n```"},
+            ]
+        messages.append({"role": "user", "content": question})
         attempts: list[Attempt] = []
 
         for _ in range(self.max_attempts):
@@ -117,7 +131,7 @@ class Agent:
             return AgentResult(
                 question,
                 "ok",
-                self._answer_or_fallback(question, sql, result),
+                self._answer_or_fallback(question, sql, result, context),
                 sql=sql,
                 rows=result.rows,
                 truncated=result.truncated,
@@ -130,18 +144,35 @@ class Agent:
         )
         return AgentResult(question, "failed", answer, sql=attempts[-1].sql, attempts=attempts)
 
-    def answer(self, question: str, sql: str, result: QueryResult) -> str:
+    def answer(
+        self,
+        question: str,
+        sql: str,
+        result: QueryResult,
+        context: Sequence[AgentResult] = (),
+    ) -> str:
+        content = self._describe_result(question, sql, result)
+        if context:
+            # "e por estado?" sozinho não diz do que se trata; a pergunta anterior diz
+            content = f"Pergunta anterior da conversa: {context[-1].question}\n\n{content}"
         return self.llm.complete(
             [
                 {"role": "system", "content": self._answer_system_prompt},
-                {"role": "user", "content": self._describe_result(question, sql, result)},
+                {"role": "user", "content": content},
             ]
         )
 
-    def _answer_or_fallback(self, question: str, sql: str, result: QueryResult) -> str:
+    def _recent_turns(self, history: Sequence[AgentResult]) -> list[AgentResult]:
+        # só turnos que deram certo: SQL com erro ou bloqueado não é exemplo a seguir
+        usable = [r for r in history if r.ok and r.sql]
+        return usable[-self.max_history :] if self.max_history else []
+
+    def _answer_or_fallback(
+        self, question: str, sql: str, result: QueryResult, context: Sequence[AgentResult]
+    ) -> str:
         # a consulta já deu certo: se o LLM falhar agora, a tabela ainda vale ser mostrada
         try:
-            return self.answer(question, sql, result)
+            return self.answer(question, sql, result, context)
         except LLMError:
             return "Consulta executada, mas não consegui gerar a explicação agora. Veja a tabela."
 

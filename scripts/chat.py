@@ -40,11 +40,14 @@ def show(result: AgentResult) -> None:
     print(f"\n{LABELS[result.status]}: {result.answer.strip()}\n")
 
 
-def ask(agent: Agent, question: str) -> None:
+def ask(agent: Agent, question: str, history: list[AgentResult]) -> None:
     try:
-        show(agent.ask(question))
+        result = agent.ask(question, history)
     except LLMError as exc:
         print(f"\nErro ao chamar o LLM: {exc}\n")
+        return
+    show(result)
+    history.append(result)
 
 
 def main() -> int:
@@ -56,11 +59,12 @@ def main() -> int:
         print(exc)
         return 1
 
+    history: list[AgentResult] = []  # memória da conversa no modo interativo
     if len(sys.argv) > 1:
-        ask(agent, " ".join(sys.argv[1:]))
+        ask(agent, " ".join(sys.argv[1:]), history)
         return 0
 
-    print("Pergunte sobre os dados da Olist (ou 'sair').")
+    print("Pergunte sobre os dados da Olist (ou 'sair'). Pode fazer perguntas de seguimento.")
     while True:
         try:
             question = input("\n> ").strip()
@@ -68,7 +72,7 @@ def main() -> int:
             break
         if question.lower() in {"sair", "exit", "quit", ""}:
             break
-        ask(agent, question)
+        ask(agent, question, history)
     return 0
 
 
