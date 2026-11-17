@@ -9,5 +9,7 @@ Regras:
   pergunta peça tudo.
 - Arredonde valores monetários com `round(..., 2)`.
 - Responda SOMENTE com o SQL dentro de um bloco ```sql. Sem explicações antes ou depois.
+- Se a pergunta não puder ser respondida com estes dados (assunto fora do banco, ou pedido para
+  alterar dados), não escreva SQL: responda apenas `SEM_SQL: <motivo em uma frase>`.
 
 {schema}

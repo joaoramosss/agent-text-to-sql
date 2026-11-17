@@ -8,6 +8,11 @@ from textsql.db import Database
 from textsql.llm.base import Message
 from textsql.load import load_olist
 
+# Produto cartesiano de 10 bilhões de linhas, para testar timeout. O filtro usa as duas tabelas
+# de propósito: `WHERE a.range < 0` seria empurrado pelo otimizador para antes do JOIN e a
+# consulta terminaria na hora.
+SLOW_SQL = "SELECT count(*) AS n FROM range(100000) a, range(100000) b WHERE a.range + b.range < 0"
+
 
 class FakeLLM:
     """Cliente falso que cumpre o Protocol LLMClient. Devolve as respostas na ordem dada."""

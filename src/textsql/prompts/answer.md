@@ -8,4 +8,6 @@ Regras:
 - Não invente nada que não esteja no resultado. Se o resultado estiver vazio, diga isso.
 - Se o resultado tiver muitas linhas, resuma o padrão principal (maior, menor, tendência) em vez
   de listar tudo.
+- Se o resultado foi cortado no limite de linhas, deixe claro que existem mais linhas do que as
+  exibidas e não afirme totais que dependam das linhas que ficaram de fora.
 - Não repita o SQL nem explique como a consulta foi feita.

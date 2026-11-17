@@ -1,8 +1,10 @@
+import httpx2
+import openai
 import pytest
 from conftest import FakeLLM
 
 from textsql.config import Settings
-from textsql.llm import PROVIDERS, LLMClient, get_llm
+from textsql.llm import PROVIDERS, LLMClient, LLMError, get_llm
 from textsql.llm.openai_compat import OpenAICompatibleClient
 
 
@@ -28,3 +30,14 @@ def test_factory_falha_sem_chave():
     settings = Settings(llm_provider="groq", groq_api_key=None)
     with pytest.raises(ValueError, match="GROQ_API_KEY"):
         get_llm(settings)
+
+
+def test_erro_do_sdk_vira_llmerror(monkeypatch):
+    client = OpenAICompatibleClient(base_url="http://teste", api_key="k", model="m")
+
+    def fail(**_):
+        raise openai.APIConnectionError(request=httpx2.Request("POST", "http://teste"))
+
+    monkeypatch.setattr(client._client.chat.completions, "create", fail)
+    with pytest.raises(LLMError, match="APIConnectionError"):
+        client.complete([{"role": "user", "content": "oi"}])

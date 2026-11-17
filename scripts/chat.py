@@ -7,37 +7,54 @@ Uso:
 
 import sys
 
-import duckdb
-
-from textsql.agent import Agent, AgentResult
-from textsql.db import Database
-from textsql.llm import get_llm
+from textsql.agent import Agent, AgentResult, build_agent
+from textsql.errors import LLMError
 
 MAX_ROWS_SHOWN = 20
 
+LABELS = {
+    "ok": "Resposta",
+    "unanswerable": "Sem consulta",
+    "blocked": "Bloqueado",
+    "failed": "Falhou",
+}
+
 
 def show(result: AgentResult) -> None:
-    print(f"\nSQL:\n{result.sql}\n")
-    total = len(result.rows)
-    print(f"Resultado ({total} linha(s)):")
-    if total:
-        print(result.rows.head(MAX_ROWS_SHOWN).to_string(index=False))
-        if total > MAX_ROWS_SHOWN:
-            print(f"... (+{total - MAX_ROWS_SHOWN} linhas)")
-    print(f"\nResposta: {result.answer.strip()}\n")
+    for i, attempt in enumerate(result.attempts, 1):
+        if attempt.error:
+            print(f"\n[tentativa {i}] {attempt.error.splitlines()[0]}")
+
+    if result.sql:
+        print(f"\nSQL:\n{result.sql}\n")
+
+    if result.rows is not None:
+        total = len(result.rows)
+        limit_note = " - limite atingido, há mais linhas" if result.truncated else ""
+        print(f"Resultado ({total} linha(s){limit_note}):")
+        if total:
+            print(result.rows.head(MAX_ROWS_SHOWN).to_string(index=False))
+            if total > MAX_ROWS_SHOWN:
+                print(f"... (+{total - MAX_ROWS_SHOWN} linhas)")
+
+    print(f"\n{LABELS[result.status]}: {result.answer.strip()}\n")
 
 
 def ask(agent: Agent, question: str) -> None:
     try:
         show(agent.ask(question))
-    except duckdb.Error as exc:
-        print(f"\nErro ao executar o SQL: {exc}\n")
-    except ValueError as exc:
-        print(f"\n{exc}\n")
+    except LLMError as exc:
+        print(f"\nErro ao chamar o LLM: {exc}\n")
 
 
 def main() -> int:
-    agent = Agent(get_llm(), Database())
+    # no Windows, saída redirecionada (pipe, arquivo) usaria cp1252 e quebraria acentos
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    try:
+        agent = build_agent()
+    except (ValueError, FileNotFoundError) as exc:  # chave ausente, banco não gerado
+        print(exc)
+        return 1
 
     if len(sys.argv) > 1:
         ask(agent, " ".join(sys.argv[1:]))

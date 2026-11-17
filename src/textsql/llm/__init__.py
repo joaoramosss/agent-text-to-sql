@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from textsql.config import Settings, load_settings
+from textsql.errors import LLMError
 from textsql.llm.base import LLMClient, Message
 from textsql.llm.openai_compat import OpenAICompatibleClient
 
-__all__ = ["LLMClient", "Message", "get_llm", "PROVIDERS"]
+__all__ = ["LLMClient", "LLMError", "Message", "get_llm", "PROVIDERS"]
 
 # provedor -> (base_url, campo de Settings com a chave)
 PROVIDERS: dict[str, tuple[str, str]] = {

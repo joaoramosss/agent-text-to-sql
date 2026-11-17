@@ -1,6 +1,7 @@
 import pytest
 
-from textsql.sql_utils import extract_sql
+from textsql.errors import SQLError
+from textsql.sql_utils import extract_sql, no_sql_reason
 
 
 def test_bloco_sql():
@@ -27,6 +28,26 @@ def test_usa_o_primeiro_bloco():
     assert extract_sql(text) == "SELECT 1"
 
 
-def test_sem_sql_falha_claro():
-    with pytest.raises(ValueError, match="Não encontrei SQL"):
+def test_sem_sql_e_erro_corrigivel():
+    with pytest.raises(SQLError, match="Não encontrei SQL"):
         extract_sql("Não sei responder isso.")
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "SEM_SQL: Não há dados de clima.",
+        "  sem_sql: Não há dados de clima.",
+        "`SEM_SQL: Não há dados de clima.`",
+    ],
+)
+def test_marcador_sem_sql(text):
+    assert no_sql_reason(text) == "Não há dados de clima."
+
+
+def test_marcador_sem_motivo_tem_texto_padrao():
+    assert no_sql_reason("SEM_SQL:")
+
+
+def test_resposta_com_sql_nao_e_sem_sql():
+    assert no_sql_reason("```sql\nSELECT 1\n```") is None

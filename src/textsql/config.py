@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Literal
 
 from dotenv import load_dotenv
-from pydantic import BaseModel
+from pydantic import BaseModel, PositiveFloat, PositiveInt
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -24,6 +24,10 @@ class Settings(BaseModel):
     groq_api_key: str | None = None
     openrouter_api_key: str | None = None
     db_path: Path = PROJECT_ROOT / "data" / "olist.duckdb"
+    # limites do agente
+    sql_max_rows: PositiveInt = 1000
+    sql_timeout_seconds: PositiveFloat = 10.0
+    agent_max_attempts: PositiveInt = 3
 
 
 # Variável de ambiente -> campo de Settings. O teste garante que o .env.example documenta todas.
@@ -33,6 +37,9 @@ ENV_VARS: dict[str, str] = {
     "GROQ_API_KEY": "groq_api_key",
     "OPENROUTER_API_KEY": "openrouter_api_key",
     "DB_PATH": "db_path",
+    "SQL_MAX_ROWS": "sql_max_rows",
+    "SQL_TIMEOUT_SECONDS": "sql_timeout_seconds",
+    "AGENT_MAX_ATTEMPTS": "agent_max_attempts",
 }
 
 

@@ -17,5 +17,8 @@ class LLMClient(Protocol):
     model: str
 
     def complete(self, messages: list[Message], *, temperature: float = 0.0) -> str:
-        """Envia a conversa e devolve o texto da resposta do assistente."""
+        """Envia a conversa e devolve o texto da resposta do assistente.
+
+        Falhas do provedor (rede, cota, erro do servidor) devem virar `textsql.errors.LLMError`.
+        """
         ...

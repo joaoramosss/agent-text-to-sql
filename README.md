@@ -3,7 +3,7 @@
 Agente conversacional que responde perguntas em português sobre dados de e-commerce (dataset Olist):
 pergunta → lê o schema → gera SQL → executa no DuckDB → corrige sozinho se der erro → responde com tabela/gráfico e explicação curta.
 
-> Em construção. Etapa atual: **3 — MVP no terminal**.
+> Em construção. Etapa atual: **4 — Robustez** (guardrails, limites e autocorreção).
 
 ```
 $ uv run python scripts/chat.py "Qual o tempo médio de entrega em dias?"
@@ -47,9 +47,11 @@ src/textsql/        código do agente
   config.py         leitura e validação do .env
   llm/              interface de LLM (trocar de provedor = mudar LLM_PROVIDER no .env)
   load.py           carga dos CSVs do Olist no DuckDB
-  db.py             conexão somente leitura e consultas
+  db.py             conexão blindada (read-only, sem acesso externo), limite de linhas e timeout
+  guardrails.py     valida o SQL do LLM pela AST (sqlglot) antes de executar
+  errors.py         exceções: corrigível (volta ao LLM) x bloqueio x falha do provedor
   schema.py         descrição do schema para o prompt (DDL gerado + notas de negócio)
-  agent.py          pergunta -> SQL -> execução -> resposta (duas chamadas ao LLM)
+  agent.py          pergunta -> SQL -> validação -> execução -> resposta, com autocorreção
   sql_utils.py      extrai o SQL da resposta do modelo
   prompts/          textos que vão para o LLM (.md), carregados por load_prompt()
 scripts/            utilitários de linha de comando
@@ -59,4 +61,26 @@ data/               dataset e banco (não versionados)
 
 ## Arquitetura e trade-offs
 
-_Seção preenchida ao longo das etapas._
+### Fluxo do agente
+
+```
+pergunta ─► LLM gera SQL ─► guardrails ─► DuckDB (limite + timeout) ─► LLM redige resposta
+               ▲                │  │                │
+               └── erro corrigível (sintaxe, coluna inexistente, timeout): até 3 tentativas
+                                   └─► bloqueio de segurança: para na hora, sem nova tentativa
+```
+
+`Agent.ask()` devolve um `AgentResult` com `status`:
+`ok` | `unanswerable` (o modelo respondeu `SEM_SQL:`) | `blocked` | `failed` (esgotou tentativas),
+além do histórico de tentativas (`attempts`).
+
+### Segurança em camadas
+
+| Camada | O que faz | Por que não basta sozinha |
+|---|---|---|
+| Prompt | pede só `SELECT`; dá a saída `SEM_SQL:` para pedidos fora do escopo | o modelo pode desobedecer ou ser induzido |
+| `guardrails.py` (AST) | um único comando de leitura; nenhum DML/DDL na árvore (nem em CTE); só tabelas do schema; sem funções de arquivo/rede/ambiente | outro parser pode divergir do DuckDB; denylist de funções é incompleta |
+| `db.py` (motor) | `read_only`, `enable_external_access=false`, `lock_configuration=true`; parser do DuckDB confirma um único `SELECT` | `read_only` ainda permite `CREATE TEMP TABLE`, por isso a AST |
+
+Limites: `SQL_MAX_ROWS` (padrão 1000, detectado com `LIMIT N+1`), `SQL_TIMEOUT_SECONDS`
+(padrão 10, via `interrupt()`), `AGENT_MAX_ATTEMPTS` (padrão 3).
